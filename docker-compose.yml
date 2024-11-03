@@ -24,7 +24,7 @@ services:
 
   # Graph database to store data
   neo4j:
-    image: neo4j:${NEO4J_VERSION?Variable not set}
+    image: neo4j:${APP_NEO4J_VERSION?Variable not set}
     container_name: neo4j
     networks:
       - traefik-public
@@ -42,8 +42,8 @@ services:
 #      - .env
     environment:
       # General
-      - NEO4J_server_config_strict__validation_enabled=false # https://stackoverflow.com/questions/76207890/neo4j-docker-compose-to-kubernetes/77261518
-      - NEO4J_AUTH=${NEO4J_AUTH?Variable not set}
+      #- NEO4J_server_config_strict__validation_enabled=false # https://stackoverflow.com/questions/76207890/neo4j-docker-compose-to-kubernetes/77261518
+      - NEO4J_AUTH=${APP_NEO4J_AUTH?Variable not set}
       - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
       - NEO4J_server_memory_heap_initial__size=${NEO4J_server_memory_heap_initial__size?Variable not set}
       - NEO4J_server_memory_heap_max__size=${NEO4J_server_memory_heap_max__size?Variable not set}
@@ -59,10 +59,10 @@ services:
       # Communication
       - NEO4J_server_http_advertised__address=${STACK_NAME?Variable not set}neo4j.${DOMAIN?Variable not set}
       - NEO4J_server_bolt_advertised__address=${STACK_NAME?Variable not set}neo4jbolt.${DOMAIN?Variable not set}
-      # Metrics (only available in enterprise edition?)
-      - NEO4J_server_metrics_csv_enabled=false
-      - NEO4J_server_metrics_prometheus_enabled=true
-      - NEO4J_server_metrics_prometheus_endpoint=neo4jmetrics.${DOMAIN?Variable not set}
+      # Metrics (only available in enterprise edition)
+      #- NEO4J_server_metrics_csv_enabled=false
+      #- NEO4J_server_metrics_prometheus_enabled=true
+      #- NEO4J_server_metrics_prometheus_endpoint=neo4jmetrics.${DOMAIN?Variable not set}
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-public
