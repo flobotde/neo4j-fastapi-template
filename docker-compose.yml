@@ -1,46 +1,146 @@
 services:
+  # # Dashboard for viewing metrics
+  # grafana:
+  #   image: grafana/grafana-oss:latest
+  # container_name: grafana
+  #   ports:
+  #     - '127.0.0.1:3000:3000'
+  #   volumes:
+  #     - ./app-data/grafana:/var/lib/grafana
 
-  db:
-    image: postgres:12
-    restart: always
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      retries: 5
-      start_period: 30s
-      timeout: 10s
-    volumes:
-      - app-db-data:/var/lib/postgresql/data/pgdata
-    env_file:
-      - .env
-    environment:
-      - PGDATA=/var/lib/postgresql/data/pgdata
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
-      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
-      - POSTGRES_DB=${POSTGRES_DB?Variable not set}
+  # # TSDB to save metrics
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: prometheus
+  #   ports:
+  #     - 127.0.0.1:9090:9090
+  #   command: 
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--web.enable-admin-api'  
+  #     - '--storage.tsdb.retention.time=1y'
+  #   volumes:
+  #     - ./app-data/prometheus/config:/etc/prometheus
+  #     - ./app-data/prometheus/data:/prometheus
 
-  adminer:
-    image: adminer
-    restart: always
+  # Graph database to store data
+  neo4j:
+    image: neo4j:${NEO4J_VERSION?Variable not set}
+    container_name: neo4j
     networks:
       - traefik-public
       - default
-    depends_on:
-      - db
+    volumes:
+      - ./app-data/neo4j/data:/data
+      - ./app-data/neo4j/logs:/logs
+      - ./app-data/neo4j/import:/var/lib/neo4j/import
+      - ./app-data/neo4j/plugins:/plugins
+    ports:
+      - 7474:7474
+      - 7687:7687 
+      - 2004:2004
+#    env_file:
+#      - .env
     environment:
-      - ADMINER_DESIGN=pepa-linha-dark
+      # General
+      - NEO4J_server_config_strict__validation_enabled=false # https://stackoverflow.com/questions/76207890/neo4j-docker-compose-to-kubernetes/77261518
+      - NEO4J_AUTH=${NEO4J_AUTH?Variable not set}
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      - NEO4J_server_memory_heap_initial__size=${NEO4J_server_memory_heap_initial__size?Variable not set}
+      - NEO4J_server_memory_heap_max__size=${NEO4J_server_memory_heap_max__size?Variable not set}
+      - NEO4J_server_memory_pagecache_size=${NEO4J_server_memory_pagecache_size?Variable not set}
+      # APOC plugin:
+      - NEO4J_PLUGINS=["apoc"]
+      #- NEO4J_PLUGINS=["apoc", "graph-data-science"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.\*
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+      - NEO4J_apoc_trigger_enabled=true
+      # Communication
+      - NEO4J_server_http_advertised__address=${STACK_NAME?Variable not set}neo4j.${DOMAIN?Variable not set}
+      - NEO4J_server_bolt_advertised__address=${STACK_NAME?Variable not set}neo4jbolt.${DOMAIN?Variable not set}
+      # Metrics (only available in enterprise edition?)
+      - NEO4J_server_metrics_csv_enabled=false
+      - NEO4J_server_metrics_prometheus_enabled=true
+      - NEO4J_server_metrics_prometheus_endpoint=neo4jmetrics.${DOMAIN?Variable not set}
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik-public
       - traefik.constraint-label=traefik-public
-      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-http.rule=Host(`adminer.${DOMAIN?Variable not set}`)
-      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-http.entrypoints=http
-      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-http.middlewares=https-redirect
-      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.rule=Host(`adminer.${DOMAIN?Variable not set}`)
-      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.entrypoints=https
-      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.tls=true
-      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.tls.certresolver=le
-      - traefik.http.services.${STACK_NAME?Variable not set}-adminer.loadbalancer.server.port=8080
+      # neo4j database
+      - traefik.http.services.${STACK_NAME?Variable not set}-neo4j.loadbalancer.server.port=7474
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4j-http.rule=Host(`neo4.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4j-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4j-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4j-https.rule=Host(`neo4j.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4j-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4j-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4j-https.tls.certresolver=le
+      # neo4j bolt
+      - traefik.tcp.services.${STACK_NAME?Variable not set}-neo4jbolt.loadbalancer.server.port=7687
+      - traefik.tcp.routers.${STACK_NAME?Variable not set}-neo4jbolt-http.rule=Host(`neo4bolt.${DOMAIN?Variable not set}`)
+      - traefik.tcp.routers.${STACK_NAME?Variable not set}-neo4jbolt-http.entrypoints=http
+      - traefik.tcp.routers.${STACK_NAME?Variable not set}-neo4jbolt-http.middlewares=https-redirect
+      - traefik.tcp.routers.${STACK_NAME?Variable not set}-neo4jbolt-https.rule=Host(`neo4jbolt.${DOMAIN?Variable not set}`)
+      - traefik.tcp.routers.${STACK_NAME?Variable not set}-neo4jbolt-https.tls=true
+      - traefik.tcp.routers.${STACK_NAME?Variable not set}-neo4jbolt-https.tls.certresolver=le
+      # neo4j metrics
+      - traefik.http.services.${STACK_NAME?Variable not set}-neo4jmetrics.loadbalancer.server.port=2004
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4jmetrics-http.rule=Host(`neo4metrics.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4jmetrics-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4jmetrics-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4jmetrics-https.rule=Host(`neo4jmetrics.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4jmetrics-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4jmetrics-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-neo4jmetrics-https.tls.certresolver=le
+    healthcheck:
+      test: ["CMD", "wget", "http://neo4j:7474"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 30s  
+
+  # db:
+  #   image: postgres:12
+  #   restart: always
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+  #     interval: 10s
+  #     retries: 5
+  #     start_period: 30s
+  #     timeout: 10s
+  #   volumes:
+  #     - app-db-data:/var/lib/postgresql/data/pgdata
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - PGDATA=/var/lib/postgresql/data/pgdata
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+  #     - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+  #     - POSTGRES_DB=${POSTGRES_DB?Variable not set}
+
+  # adminer:
+  #   image: adminer
+  #   restart: always
+  #   networks:
+  #     - traefik-public
+  #     - default
+  #   depends_on:
+  #     - db
+  #   environment:
+  #     - ADMINER_DESIGN=pepa-linha-dark
+  #   labels:
+  #     - traefik.enable=true
+  #     - traefik.docker.network=traefik-public
+  #     - traefik.constraint-label=traefik-public
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-http.rule=Host(`adminer.${DOMAIN?Variable not set}`)
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-http.entrypoints=http
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-http.middlewares=https-redirect
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.rule=Host(`adminer.${DOMAIN?Variable not set}`)
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.entrypoints=https
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.tls=true
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.tls.certresolver=le
+  #     - traefik.http.services.${STACK_NAME?Variable not set}-adminer.loadbalancer.server.port=8080
 
   prestart:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
@@ -50,7 +150,7 @@ services:
       - traefik-public
       - default
     depends_on:
-      db:
+      neo4j:
         condition: service_healthy
         restart: true
     command: bash scripts/prestart.sh
@@ -68,11 +168,6 @@ services:
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
-      - POSTGRES_SERVER=db
-      - POSTGRES_PORT=${POSTGRES_PORT}
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
       - SENTRY_DSN=${SENTRY_DSN}
 
   backend:
@@ -82,7 +177,7 @@ services:
       - traefik-public
       - default
     depends_on:
-      db:
+      neo4j:
         condition: service_healthy
         restart: true
       prestart:
@@ -101,11 +196,6 @@ services:
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
-      - POSTGRES_SERVER=db
-      - POSTGRES_PORT=${POSTGRES_PORT}
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
       - SENTRY_DSN=${SENTRY_DSN}
 
     healthcheck:
@@ -134,38 +224,38 @@ services:
       # Enable redirection for HTTP and HTTPS
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-http.middlewares=https-redirect
 
-  frontend:
-    image: '${DOCKER_IMAGE_FRONTEND?Variable not set}:${TAG-latest}'
-    restart: always
-    networks:
-      - traefik-public
-      - default
-    build:
-      context: ./frontend
-      args:
-        - VITE_API_URL=https://api.${DOMAIN?Variable not set}
-        - NODE_ENV=production
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=traefik-public
-      - traefik.constraint-label=traefik-public
+  # frontend:
+  #   image: '${DOCKER_IMAGE_FRONTEND?Variable not set}:${TAG-latest}'
+  #   restart: always
+  #   networks:
+  #     - traefik-public
+  #     - default
+  #   build:
+  #     context: ./frontend
+  #     args:
+  #       - VITE_API_URL=https://api.${DOMAIN?Variable not set}
+  #       - NODE_ENV=production
+  #   labels:
+  #     - traefik.enable=true
+  #     - traefik.docker.network=traefik-public
+  #     - traefik.constraint-label=traefik-public
 
-      - traefik.http.services.${STACK_NAME?Variable not set}-frontend.loadbalancer.server.port=80
+  #     - traefik.http.services.${STACK_NAME?Variable not set}-frontend.loadbalancer.server.port=80
 
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.rule=Host(`dashboard.${DOMAIN?Variable not set}`)
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.entrypoints=http
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.rule=Host(`dashboard.${DOMAIN?Variable not set}`)
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.entrypoints=http
 
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.rule=Host(`dashboard.${DOMAIN?Variable not set}`)
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.entrypoints=https
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.tls=true
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.tls.certresolver=le
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.rule=Host(`dashboard.${DOMAIN?Variable not set}`)
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.entrypoints=https
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.tls=true
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.tls.certresolver=le
 
-      # Enable redirection for HTTP and HTTPS
-      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.middlewares=https-redirect
+  #     # Enable redirection for HTTP and HTTPS
+  #     - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.middlewares=https-redirect
 volumes:
-  app-db-data:
+  app-data:
 
 networks:
   traefik-public:
     # Allow setting it to false for testing
-    external: true
+    external: false

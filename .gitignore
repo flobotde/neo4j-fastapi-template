@@ -177,8 +177,5 @@ docker-compose.override.yml
 # MAC OS Stuff
 .DS_Store
 
-# Neo4J - local app data
-neo4j/data
-neo4j/logs
-neo4j/import
-neo4j/plugins
+# persistant local app data while testing on local machine
+app-data/*
